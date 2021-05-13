@@ -245,7 +245,7 @@ checkGateways :: Position -> Maybe Position -> (Position, Position) -> Maybe Pos
 checkGateways p acc g
     | ((fst p) == (fst (fst g)) && ((snd p) == (snd (fst g)))) = (Just (snd g))
     | ((fst p) == (fst (snd g)) && ((snd p) == (snd (snd g)))) = (Just (fst g))
-    | otherwise = Nothing
+    | otherwise = acc
 
 searchForDestination :: Position -> [(Position, Position)] -> Maybe Position
 searchForDestination pos gateways = foldl (checkGateways pos) Nothing gateways
@@ -453,8 +453,27 @@ isTargetKilled position1 target
     Dubla verificare a anihilării Target-urilor, în pașii 2 și 4, îi oferă Hunter-ului
     un avantaj în prinderea lor.
 -}
+
+directionToInt :: Direction -> Int
+directionToInt dir
+    | dir == North = 2
+    | dir == South = 3
+    | dir == West = 1
+    | otherwise = 0
+
+eliminateTargets :: Game -> Game
+eliminateTargets game@(Game rows columns targets hunter obstacles gateways) =
+    Game rows columns newTargets hunter obstacles gateways
+    where newTargets = foldl (\acc x -> if (not (isTargetKilled hunter x)) then acc ++ [x] else acc) [] targets
+
 advanceGameState :: Direction -> Bool -> Game -> Game
-advanceGameState = undefined
+advanceGameState dir flag game@(Game rows columns targets hunter obstacles gateways)
+    | flag == True = eliminateTargets $ moveTargets $ eliminateTargets game_hunter
+    | flag == False = game_hunter
+    where pos = computePosition (directionToInt dir) columns hunter
+          may = attemptMove pos game
+          game_hunter = if (may == Nothing) then game
+                    else Game rows columns targets (fromMaybePosToPos may) obstacles gateways
 
 {-
     ***  TODO ***
@@ -462,7 +481,10 @@ advanceGameState = undefined
     Verifică dacă mai există Target-uri pe table de joc.
 -}
 areTargetsLeft :: Game -> Bool
-areTargetsLeft = undefined
+areTargetsLeft game@(Game rows columns targets hunter obstacles gateways)
+    | (length targets) /= 0 = True
+    | otherwise = False
+
 
 {-
     *** BONUS TODO ***
@@ -474,9 +496,36 @@ areTargetsLeft = undefined
     Puteți testa utilizând terenul circle.txt din directorul terrains, în conjuncție
     cu funcția interactive.
 -}
-circle :: Position -> Int -> Behavior
-circle = undefined
 
+{- 
+    Position -> Int -> Position -> Game -> Target
+    IMPORTANT!!
+    Comenzi de testare:
+    -- interactive $ loadGame "terrains/circle.txt" [circle (4, 9) 2] []
+    -- interactive $ loadGame "terrains/circle.txt" [circle (4, 9) 3] []
+    (a doua poate fi data cu conditia sa fie schimbata pozitia targetului
+    pe tabla de joc)
+-}
+circle :: Position -> Int -> Behavior
+circle pos r t game@(Game rows columns targets hunter obstacles gateways)
+    | (not ((snd pos) - y >= aux)) && ((fst pos) - x == aux + 1) = Target (x, y - 1) (circle pos r) -- mergem catre est
+    | ((snd pos) - y) == aux && x < (fst pos) = Target (x + 1, y - 1) (circle pos r) -- mergem pe diagonala sud-vest 
+    | (not ((x - (fst pos)) >= aux)) && y < (snd pos) = Target (x + 1, y) (circle pos r) -- merg in jos
+    | (x - (fst pos)) == aux && y < (snd pos) = Target (x + 1, y + 1) (circle pos r) -- merg spre sud-est
+    | (x > (fst pos)) && (not ((y - (snd pos)) >= aux)) = Target (x, y + 1) (circle pos r) -- merg spre est
+    | (y - (snd pos)) == aux && (x > (fst pos)) = Target (x - 1, y + 1) (circle pos r) -- merg spre nord-est
+    | y > (snd pos) && (not ((fst pos) - x >= aux)) = Target (x - 1, y) (circle pos r) -- merg spre nord
+    | (fst pos) - x == aux && y > (snd pos) = Target (x - 1, y - 1) (circle pos r) -- merg spre nord-vest
+    | otherwise = Target t (circle pos r)
+    where x = fst t
+          y = snd t
+          line = 2 * r - 1
+          aux = (line - 1) `div` 2
+
+isValidSuccessor :: Game -> (Direction, Game) -> Bool
+isValidSuccessor game pair
+    | game == snd pair = False
+    | otherwise = True
 
 instance ProblemState Game Direction where
     {-
@@ -485,23 +534,30 @@ instance ProblemState Game Direction where
         Generează succesorii stării curente a jocului.
         Utilizați advanceGameState, cu parametrul Bool ales corespunzător.
     -}
-    successors = undefined
 
-    {-
+    successors game@(Game rows columns targets hunter obstacles gateways) =
+        [(North, advanceGameState North False game)] ++ [(South, advanceGameState South False game)] ++
+        [(East, advanceGameState East False game)] ++ [(West, advanceGameState West False game)]
+
+    {-  
         *** TODO ***
         
         Verifică dacă starea curentă este un în care Hunter-ul poate anihila
         un Target. Puteți alege Target-ul cum doriți, în prezența mai multora.
     -}
-    isGoal  = undefined
-
+    isGoal game@(Game rows columns targets hunter obstacles gateways) =
+        if (isTargetKilled hunter target) then True
+            else False
+        where target = head targets
     {-
         *** TODO ***
         
         Euristica euclidiană (vezi hEuclidian mai jos) până la Target-ul ales
         de isGoal.
     -}
-    h = undefined
+    h game@(Game rows columns targets hunter obstacles gateways) = 
+        hEuclidean hunter (position target)
+        where target = head targets
 
 {-
      ** NU MODIFICATI **
@@ -510,6 +566,9 @@ hEuclidean :: Position -> Position -> Float
 hEuclidean (x1, y1) (x2, y2) = fromIntegral $ ((x1 - x2) ^ pow) + ((y1 - y2) ^ pow)
   where
     pow = 2 :: Int
+
+fromJustTarget :: Maybe Target -> Target
+fromJustTarget (Just target) = target
 
 {-
     *** BONUS ***
@@ -541,7 +600,9 @@ instance ProblemState BonusGame Direction where
         Hint: Puteți să folosiți funcția fmap pe perechi pentru acest lucru.
         https://wiki.haskell.org/Functor
     -}
-    successors = undefined
+    successors (BonusGame game@(Game rows columns targets hunter obstacles gateways)) =
+        [(North, (BonusGame (advanceGameState North False game)))] ++ [(South, (BonusGame (advanceGameState South False game)))] ++
+        [(East, (BonusGame (advanceGameState East False game)))] ++ [(West, (BonusGame (advanceGameState West False game)))]
 
     {-
         *** BONUS TODO ***
@@ -550,7 +611,10 @@ instance ProblemState BonusGame Direction where
 
         Hint: Folosiți funcția isGoal deja implementată pentru tipul Game.
     -}
-    isGoal = undefined
+    isGoal (BonusGame game@(Game rows columns targets hunter obstacles gateways)) =
+        if (isTargetKilled hunter target) then True
+            else False
+        where target = head targets
 
     {-
         *** BONUS TODO ***
@@ -562,4 +626,16 @@ instance ProblemState BonusGame Direction where
 
         OBSERVAȚIE: Pentru testare se va folosi fișierul terrains/game-6.txt.
     -}
-    h = undefined
+
+    -- h (BonusGame game@(Game rows columns targets hunter obstacles gateways)) =
+    --     hEuclidean hunter (position target)
+    --     where target = foldl (\acc x -> if ((hEuclidean hunter (position x)) > (hEuclidean hunter (position acc))) then acc else x) (head targets) (tail targets)
+
+    -- h (BonusGame game@(Game rows columns targets hunter obstacles gateways)) =
+    --     hEuclidean hunter (position target)
+    --     where target = foldl (\acc x -> if (((hEuclidean hunter (position x)) > (hEuclidean hunter (position acc))) && ((hEuclidean hunter (position x)) > ((hEuclidean hunter (position (behavior x (position x) game)))))) then acc else x) (head targets) (tail targets)
+
+    h g@(BonusGame game@(Game rows columns targets hunter obstacles gateways))
+        | target == Nothing = 100
+        | otherwise = hEuclidean hunter (position (fromJustTarget target))
+        where target = if (isGoal g) then (Just $ head targets) else Nothing

@@ -21,18 +21,27 @@ import qualified Data.Set as S
     * copiii, ce vor desemna stările învecinate;
 -}
 
-data Node s a = UndefinedNode
+data Node s a = Node {
+    state :: s,
+    action :: Maybe a,
+    parent :: Maybe (Node s a),
+    depth :: Int,
+    heuristic :: Float,
+    children :: [Node s a]
+}
 
 {-
     *** TODO ***
     Instanțiați Eq și Ord pe baza stării.
 -}
 
-instance Eq s => Eq (Node s a) where
-    _ == _ = undefined
+instance Eq s => Eq (Node s a) where 
+    node1 == node2 = (state node1) == (state node2)
+    _ == _ = False
 
 instance Ord s => Ord (Node s a) where
-    _ <= _ = undefined
+    node1 <= node2 = (state node1) <= (state node2)
+    _ <= _ = False
 
 {-
     *** TODO ***
@@ -40,22 +49,22 @@ instance Ord s => Ord (Node s a) where
 -}
 
 nodeState :: Node s a -> s
-nodeState = undefined
+nodeState node = (state node)
 
 nodeParent :: Node s a -> Maybe (Node s a)
-nodeParent = undefined
+nodeParent node = (parent node)
 
 nodeDepth :: Node s a -> Int
-nodeDepth = undefined
+nodeDepth node = (depth node)
 
 nodeChildren :: Node s a -> [Node s a]
-nodeChildren = undefined
+nodeChildren node = (children node)
 
 nodeHeuristic :: Node s a -> Float
-nodeHeuristic = undefined
+nodeHeuristic node = (heuristic node)
 
 nodeAction :: Node s a -> Maybe a
-nodeAction = undefined
+nodeAction node = (action node) 
 
 {-
     *** TODO ***
@@ -65,8 +74,19 @@ nodeAction = undefined
     departe, recursiv.
 -}
 
+createStateSpaceHelper :: (ProblemState s a, Eq s) => s -> a -> Maybe (Node s a) -> Int -> Float -> Node s a
+createStateSpaceHelper state action parent depth heu = currentNode
+    where currentNode = Node state (Just action) parent depth heu children
+          children = (foldl (\acc x -> acc ++ [createStateSpaceHelper (snd x) (fst x) (Just currentNode) (depth + 1)
+            (h (snd x))]) [] succ)
+          succ = (successors state)
+
 createStateSpace :: (ProblemState s a, Eq s) => s -> Node s a
-createStateSpace initialState = undefined -- initialNode
+createStateSpace initialState = currentNode
+    where currentNode = Node initialState Nothing Nothing 0 (h initialState) children
+          children = (foldl (\acc x -> acc ++ [createStateSpaceHelper (snd x) (fst x) (Just currentNode) 1
+            (h (snd x))]) [] succ)
+          succ = (successors initialState)
 
 {-
     Funcție ce primește o coadă de priorități și întoarce o pereche
@@ -87,8 +107,15 @@ deleteFindMin pq = (minK, pq')
     în frontieră.
 -}
 
+findInSet :: (ProblemState s a, Ord s) => (Node s a) -> (S.Set s) -> Bool
+findInSet node set =
+    S.foldl (\acc x -> if ((nodeState node) == x) then True else acc) False set
+
 suitableSuccs :: (ProblemState s a, Ord s) => Node s a -> (S.Set s) -> [Node s a]
-suitableSuccs node visited = undefined
+suitableSuccs node visited = 
+    let state = nodeState node
+        succs = nodeChildren node
+    in foldl (\acc x -> if (not (findInSet x visited)) then acc ++ [x] else acc) [] succs
 
 {-
     *** TODO ***
@@ -103,8 +130,15 @@ suitableSuccs node visited = undefined
     2. Costul se calculează ca suma dintre adâncime și euristică.
 -}
 
+costFunction :: Int -> Float -> Float
+costFunction depth heuristic = (fromIntegral depth :: Float) + heuristic
+
 insertSucc :: (ProblemState s a, Ord s) => (PQ.PSQ (Node s a) Float) -> Node s a -> PQ.PSQ (Node s a) Float
-insertSucc frontier node = undefined -- newFrontier
+insertSucc frontier node = newFrontier
+    where heuristic = (nodeHeuristic node)
+          depth = (nodeDepth node)
+          cost = (costFunction depth heuristic)
+          newFrontier = PQ.insertWith min node cost frontier
 
 {-
     *** TODO ***
@@ -114,7 +148,9 @@ insertSucc frontier node = undefined -- newFrontier
 -}
 
 insertSuccs :: (ProblemState s a, Ord s) => (Node s a) -> (PQ.PSQ (Node s a) Float) -> (S.Set s) -> (PQ.PSQ (Node s a) Float)
-insertSuccs node frontier visited = undefined --newFrontier
+insertSuccs node frontier visited = newFrontier
+    where newFrontier = foldl insertSucc frontier validsuccessors
+          validsuccessors = suitableSuccs node visited 
 
 {-
     *** TODO ***
@@ -128,7 +164,12 @@ insertSuccs node frontier visited = undefined --newFrontier
 -}
 
 astar' :: (ProblemState s a, Ord s) => (S.Set s) -> (PQ.PSQ (Node s a) Float) -> Node s a
-astar' visited frontier = undefined -- goalNode
+astar' visited frontier =
+    if (isGoal (nodeState (fst node)))
+        then fst node
+        else astar' (S.insert (nodeState (fst node)) visited) (insertSuccs (fst node) (snd $ deleteFindMin frontier) (S.insert (nodeState (fst node)) visited))
+    where succs = suitableSuccs (fst node) visited
+          node = deleteFindMin frontier
 
 {-
     *** TODO ***
@@ -139,7 +180,7 @@ astar' visited frontier = undefined -- goalNode
 -}
 
 astar :: (ProblemState s a, Ord s) => Node s a -> Node s a
-astar initialNode = undefined -- goalNode
+astar initialNode = astar' (S.empty) (insertSucc PQ.empty initialNode) 
 
 {-
     *** TODO ***
@@ -150,5 +191,17 @@ astar initialNode = undefined -- goalNode
     ATENȚIE: Nodul inițial este singurul exclus!
 -}
 
+fromMaybeNodeToNode :: Maybe (Node s a) -> Node s a
+fromMaybeNodeToNode (Just node) = node
+
+fromMaybeActionToAction :: Maybe a -> a
+fromMaybeActionToAction (Just action) = action
+
+funcIterate :: Node s a -> Node s a
+funcIterate node = fromMaybeNodeToNode (nodeParent node)
+
 extractPath :: Node s a -> [(a, s)]
-extractPath goalNode = undefined
+extractPath goalNode = list
+    where list = foldl (\acc x -> [(fromMaybeActionToAction (nodeAction x), nodeState x)] ++ acc) [] listValid
+          listValid = takeWhile (\x -> isJust (nodeParent x)) listNodes
+          listNodes = iterate funcIterate goalNode
